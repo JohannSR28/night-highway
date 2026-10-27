@@ -30,6 +30,9 @@ const store = {
   set(k, v) { try { window.localStorage.setItem('night-highway:' + k, JSON.stringify(v)); } catch (e) { /* storage unavailable */ } },
 };
 
+// clip mode (?clip=1) is loaded lazily at the bottom; stays null for normal players
+let clip = null;
+
 // ---------- renderer ----------
 const canvas = $('scene');
 let renderer = null;
@@ -1627,8 +1630,17 @@ const audio = {
       const ctx = new AC();
       this.ctx = ctx;
       this.master = ctx.createGain();
-      this.master.gain.value = this.enabled ? 0.42 : 0;
-      this.master.connect(ctx.destination);
+      if (clip) {
+        // clip mode: the recording taps master at full level; muting (M) only silences the speakers
+        this.master.gain.value = 0.42;
+        this.spk = ctx.createGain();
+        this.spk.gain.value = this.enabled ? 1 : 0;
+        this.master.connect(this.spk).connect(ctx.destination);
+        clip.attachAudio(ctx, this.master);
+      } else {
+        this.master.gain.value = this.enabled ? 0.42 : 0;
+        this.master.connect(ctx.destination);
+      }
       this.o1 = ctx.createOscillator(); this.o1.type = 'sawtooth';
       this.o2 = ctx.createOscillator(); this.o2.type = 'square';
       this.o3 = ctx.createOscillator(); this.o3.type = 'sawtooth';
@@ -1670,7 +1682,8 @@ const audio = {
   setEnabled(on) {
     this.enabled = on;
     store.set('sound', on);
-    if (this.master) this.master.gain.setTargetAtTime(on ? 0.42 : 0, this.ctx.currentTime, 0.05);
+    if (this.spk) this.spk.gain.setTargetAtTime(on ? 1 : 0, this.ctx.currentTime, 0.05);
+    else if (this.master) this.master.gain.setTargetAtTime(on ? 0.42 : 0, this.ctx.currentTime, 0.05);
   },
   update(rpm, throttle, pv, boost, scrape) {
     if (!this.ctx) return;
@@ -1804,7 +1817,10 @@ function nearMiss(gap) {
   G.bonus += pts;
   G.nearMiss++;
   player.nitro = Math.min(1, player.nitro + 0.15);
-  popup(gap < 0.5 ? 'Close call' : 'Near miss', '+' + pts + (G.combo > 1 ? '  ×' + G.combo : ''), 'cool');
+  const label = gap < 0.5 ? 'Close call' : 'Near miss';
+  const sub = '+' + pts + (G.combo > 1 ? '  ×' + G.combo : '');
+  popup(label, sub, 'cool');
+  if (clip) clip.onNearMiss(gap, label, sub);
   audio.whoosh();
 }
 function checkTraffic() {
@@ -2008,6 +2024,7 @@ function showTitle() {
 }
 function startRun() {
   audio.init();
+  if (clip) clip.onStart();
   Object.assign(G, { state: 'countdown', cd: 3, lastCd: 4, time: 60, score: 0, bonus: 0, distRun: 0, nearMiss: 0, overtakes: 0, crashes: 0, top: 0, sumV: 0, sumT: 0, combo: 0, comboT: 0, hintT: 9 });
   togglePause(false);
   player.nitro = 1;
@@ -2050,6 +2067,7 @@ function togglePause(on) {
   G.paused = on;
   HUD.pause.hidden = !on;
   if (on) audio.suspend(); else audio.resume();
+  if (clip) clip.onPause(on);
 }
 function toggleFullscreen() {
   try {
@@ -2221,6 +2239,7 @@ function frame(now) {
   if (G.paused) return;
   update(Math.min(ms / 1000, 0.05));
   renderFrame();
+  if (clip) clip.draw();
   adaptQuality(Math.min(ms, 100));
 }
 
@@ -2248,5 +2267,8 @@ function boot(data) {
   requestAnimationFrame((t) => { last = t; frame(t); });
 }
 boot({});
+if (new URLSearchParams(window.location.search).get('clip') === '1') {
+  import('./clip.js').then((m) => { clip = m.createClip({ canvas, G, hud: HUD.hud }); }).catch(() => { /* clip mode is optional */ });
+}
 window.NightHighway = { G, player, keys, startRun, endRun };
 }
