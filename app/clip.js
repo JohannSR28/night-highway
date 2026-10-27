@@ -142,7 +142,7 @@ export function createClip({ canvas, G, hud }) {
   let outroT0 = 0, lastDraw = 0, recT0 = 0, shownState = '';
   let blobUrl = null;
   let st = STYLES.defi, title = '', endText = '', gy = 420, hideHudNow = false;
-  let popup = null, fin = { score: 0, dist: 0, nm: 0 };
+  let bestStart = 0, popup = null, fin = { score: 0, dist: 0, nm: 0 };
   let scrimTop = null, scrimBot = null;
   // game seconds that pass per real second; below 1 on slow machines, where the game's time step is capped
   let rate = 1, lastWall = 0, lastGameT = null, pausedMs = 0, pauseAt = 0;
@@ -300,6 +300,10 @@ export function createClip({ canvas, G, hud }) {
     g.shadowColor = 'rgba(0,0,0,0.7)'; g.shadowBlur = 16;
     statBlock(SAFE.left, 'left', 'SCORE', fmt(G.score), '');
     statBlock(SAFE.right, 'right', 'NEAR MISSES', String(G.nearMiss), '');
+    g.textAlign = 'left'; g.textBaseline = 'alphabetic'; g.letterSpacing = '6px';
+    g.font = font(600, 30, F.mono); g.fillStyle = C.blue;
+    g.fillText('BEST ' + fmt(Math.max(bestStart, G.score)), SAFE.left, gy + 272);
+    g.letterSpacing = '0px';
     g.restore();
     if (popup) {
       const k = (now - popup.t0) / 1250;
@@ -357,7 +361,8 @@ export function createClip({ canvas, G, hud }) {
       if (unit) { const w = g.measureText(value).width; g.font = font(600, 26, F.mono); g.fillStyle = C.dim; g.fillText(unit, x + w + 10, y + 74); }
     };
     stat(SAFE.left, 'DISTANCE', fin.dist.toFixed(2), 'km');
-    stat(SAFE.left + 450, 'NEAR MISSES', String(fin.nm), '');
+    stat(SAFE.left + 330, 'NEAR MISSES', String(fin.nm), '');
+    stat(SAFE.left + 650, 'BEST', fmt(fin.best), '');
     y += 74 + 150;
     if (endText) {
       g.font = font(900, 130, F.display);
@@ -384,6 +389,7 @@ export function createClip({ canvas, G, hud }) {
     scrimBot.addColorStop(0, 'rgba(4,7,15,0)'); scrimBot.addColorStop(1, 'rgba(4,7,15,0.9)');
     paintBackdrop();
     chunks = []; popup = null;
+    bestStart = G.best || 0; // G.best only updates when the run ends
     aborted = false;
     rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8000000, audioBitsPerSecond: 128000 });
     rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
@@ -455,7 +461,7 @@ export function createClip({ canvas, G, hud }) {
       if (phase === 'finishing') return;
       const now = performance.now();
       if (phase === 'rec' && G.state === 'end') {
-        fin = { score: Math.floor(G.score), dist: G.distRun / 1000, nm: G.nearMiss };
+        fin = { score: Math.floor(G.score), dist: G.distRun / 1000, nm: G.nearMiss, best: Math.floor(Math.max(bestStart, G.score)) };
         phase = 'outro'; outroT0 = now;
       }
       if (now - lastDraw < FRAME_MS - 2) return;
