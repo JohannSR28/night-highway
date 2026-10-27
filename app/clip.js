@@ -47,7 +47,7 @@ const MIMES = [
 ];
 
 const prefs = (() => {
-  const d = { style: 'defi', texts: {}, ends: {}, hideHud: false, last15: false };
+  const d = { style: 'defi', texts: {}, ends: {}, hideHud: false, last15: false, menuSecs: 20 };
   try {
     const p = Object.assign(d, JSON.parse(window.localStorage.getItem('night-highway:clip2') || '{}'));
     if (!STYLES[p.style]) p.style = 'defi';
@@ -117,7 +117,7 @@ async function remux(blob, ext) {
   return new Blob([data.buffer], { type: blob.type });
 }
 
-export function createClip({ canvas, G, hud }) {
+export function createClip({ canvas, G, hud, menu, initAudio }) {
   const comp = document.createElement('canvas');
   comp.width = W; comp.height = H;
   const g = comp.getContext('2d', { alpha: false });
@@ -144,6 +144,10 @@ export function createClip({ canvas, G, hud }) {
   let st = STYLES.defi, title = '', endText = '', gy = 420, hideHudNow = false;
   let bestStart = 0, popup = null, fin = { score: 0, dist: 0, nm: 0 };
   let scrimTop = null, scrimBot = null;
+  let kickerText = 'DÉFI', dlName = 'night-highway-defi', autoDl = false;
+  let bedTap = null, menuJob = null;
+  const snap = document.createElement('canvas'); // the previous look of the game, for the fade between menu shots
+  snap.width = GAME_W; snap.height = GAME_H;
   // game seconds that pass per real second; below 1 on slow machines, where the game's time step is capped
   let rate = 1, lastWall = 0, lastGameT = null, pausedMs = 0, pauseAt = 0;
   const LAST_REAL_S = 15 - OUTRO_MS / 1000; // the 15 s clip includes the 2 s end screen
@@ -179,6 +183,19 @@ export function createClip({ canvas, G, hud }) {
   };
   check('Cacher le HUD pendant l’enregistrement', 'hideHud');
   check('Clip de 15 s en tout (fin de course + écran final)', 'last15');
+  const menuRow = el('div', 'margin-top:10px;padding-top:10px;border-top:1px solid rgba(165,190,245,.24)');
+  const menuTop = el('div', 'display:flex;gap:8px;align-items:center');
+  menuTop.appendChild(el('span', 'font-size:12px;color:#a3b2d6;white-space:nowrap', 'Vidéo du menu :'));
+  const menuSel = el('select', fieldCss + ';flex:1');
+  menuSel.setAttribute('aria-label', 'Durée de la vidéo du menu');
+  [10, 15, 20, 30].forEach((n) => { const o = el('option', '', n + ' s + 2 s de fin'); o.value = String(n); menuSel.appendChild(o); });
+  menuSel.value = String([10, 15, 20, 30].includes(prefs.menuSecs) ? prefs.menuSecs : 20);
+  menuSel.addEventListener('change', () => { prefs.menuSecs = Number(menuSel.value); savePrefs(); });
+  menuTop.appendChild(menuSel);
+  const menuBtn = el('button', 'margin-top:8px;width:100%;padding:9px;border-radius:6px;border:1px solid #79c2ff;background:transparent;color:#79c2ff;font:800 13px ' + F.body + ';cursor:pointer', 'Télécharger la vidéo du menu');
+  menuBtn.type = 'button';
+  menuRow.appendChild(menuTop); menuRow.appendChild(menuBtn);
+  panel.appendChild(menuRow);
   const fmtLine = el('div', 'margin-top:8px;font-size:12px;color:' + (isMp4 ? '#8fe3a6' : '#ffb454'));
   fmtLine.textContent = !mime ? 'Enregistrement non supporté par ce navigateur.'
     : isMp4 ? 'Format : MP4 (prêt pour TikTok)'
@@ -223,7 +240,7 @@ export function createClip({ canvas, G, hud }) {
     if (!blobUrl) return;
     const a = document.createElement('a');
     a.href = blobUrl;
-    a.download = 'night-highway-' + prefs.style + '.' + ext;
+    a.download = dlName + '.' + ext;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -239,7 +256,7 @@ export function createClip({ canvas, G, hud }) {
     b.textAlign = 'left'; b.textBaseline = 'alphabetic';
     b.letterSpacing = '8px'; b.font = font(600, 28, F.mono); b.fillStyle = accent;
     b.save(); b.shadowColor = 'rgba(' + accentRgb + ',0.6)'; b.shadowBlur = 14;
-    b.fillText(st.kicker, SAFE.left, 205); b.restore();
+    b.fillText(kickerText, SAFE.left, 205); b.restore();
     b.letterSpacing = '0px';
     const boxTop = 225, boxH = gy - 10 - boxTop;
     let fs = 200, lines = [text];
@@ -268,6 +285,11 @@ export function createClip({ canvas, G, hud }) {
     let sx = 0, sy = 0, sW = sw, sH = sh;
     if (sw / sh > ta) { sW = sh * ta; sx = (sw - sW) / 2; } else { sH = sw / ta; sy = (sh - sH) / 2; }
     g.drawImage(canvas, sx, sy, sW, sH, 0, gy, GAME_W, GAME_H);
+    if (menuJob && menuJob.fade) {
+      const k = (performance.now() - menuJob.fade) / 400;
+      if (k >= 1) menuJob.fade = 0;
+      else { g.globalAlpha = 1 - k * k * (3 - 2 * k); g.drawImage(snap, 0, gy); g.globalAlpha = 1; }
+    }
     // the title band melts into the picture like the game's own veils
     g.fillStyle = scrimTop; g.fillRect(0, gy, W, 300);
     g.fillStyle = scrimBot; g.fillRect(0, gy + GAME_H - 300, W, 300);
@@ -305,6 +327,10 @@ export function createClip({ canvas, G, hud }) {
     g.fillText('BEST ' + fmt(Math.max(bestStart, G.score)), SAFE.left, gy + 272);
     g.letterSpacing = '0px';
     g.restore();
+    drawPopup(now);
+  }
+
+  function drawPopup(now) {
     if (popup) {
       const k = (now - popup.t0) / 1250;
       if (k >= 1) popup = null;
@@ -375,9 +401,95 @@ export function createClip({ canvas, G, hud }) {
     g.restore();
   }
 
+  // ---------- menu video ----------
+  function gameCrop() {
+    const sw = canvas.width, sh = canvas.height, ta = GAME_W / GAME_H;
+    if (sw / sh > ta) { const sW = sh * ta; return [(sw - sW) / 2, 0, sW, sh]; }
+    const sH = sw / ta;
+    return [0, (sh - sH) / 2, sw, sH];
+  }
+
+  function drawMenuOverlay(now) {
+    if (G.best > 0) {
+      g.save();
+      g.shadowColor = 'rgba(0,0,0,0.7)'; g.shadowBlur = 16;
+      statBlock(SAFE.left, 'left', 'MEILLEUR SCORE', fmt(G.best), '');
+      g.restore();
+    }
+    drawPopup(now);
+  }
+
+  function drawMenuOutro(t) {
+    const a = clamp(t / 300, 0, 1);
+    g.fillStyle = 'rgba(2,5,12,' + (0.72 * a).toFixed(3) + ')';
+    g.fillRect(0, 0, W, H);
+    g.save();
+    g.globalAlpha = a;
+    g.textAlign = 'left'; g.textBaseline = 'alphabetic';
+    g.font = font(900, 250, F.display);
+    g.save(); g.shadowColor = 'rgba(121,194,255,0.3)'; g.shadowBlur = 40; g.fillStyle = C.ink; g.fillText('NIGHT', SAFE.left, 800, TEXT_W); g.restore();
+    g.fillStyle = C.ink; g.fillText('NIGHT', SAFE.left, 800, TEXT_W);
+    glowText(g, 'HIGHWAY', SAFE.left, 1000, C.red, '255,43,69', 250, TEXT_W);
+    g.letterSpacing = '4px'; g.font = font(600, 38, F.mono); g.fillStyle = C.ink;
+    g.fillText(SITE_URL, SAFE.left, 1110, TEXT_W);
+    g.letterSpacing = '0px';
+    g.restore();
+  }
+
+  function restoreMenu() {
+    if (!menuJob) return;
+    menu.setPaint(menuJob.orig.paint);
+    menu.setGlow(menuJob.orig.glow);
+    G.shotT = 6.5;
+    if (bedTap) bedTap.gain.value = 0;
+    menuJob = null;
+  }
+
+  // a new "shot": next menu camera, a different paint and the next glow, with a short cross-fade
+  function nextPlan(now) {
+    const [sx, sy, sW, sH] = gameCrop();
+    snap.getContext('2d').drawImage(canvas, sx, sy, sW, sH, 0, 0, GAME_W, GAME_H);
+    menuJob.fade = now;
+    G.shot = (G.shot + 1) % 4; G.shotT = 1e6;
+    const p = (menu.paintIndex() + 1 + Math.floor(Math.random() * (menu.nPaints - 1))) % menu.nPaints;
+    const gl = (menu.glowIndex() + 1) % menu.nGlow;
+    menu.setPaint(p); menu.setGlow(gl);
+    popup = { text: menu.paintName(p), sub: menu.glowName(gl), t0: now };
+    menuJob.nextAt = now + 3000 + Math.random() * 1000;
+  }
+
+  function startMenu() {
+    if (!mime || G.state !== 'title' || phase !== 'idle') return;
+    initAudio(); // the click is the user gesture that lets the audio start
+    st = STYLES.defi; kickerText = 'NIGHT HIGHWAY'; dlName = 'night-highway-menu';
+    title = input.value.trim().replace('[SCORE]', G.best > 0 ? fmt(G.best) : 'ÇA');
+    gy = title ? 420 : 285;
+    scrimTop = g.createLinearGradient(0, gy, 0, gy + 300);
+    scrimTop.addColorStop(0, 'rgba(4,7,15,0.9)'); scrimTop.addColorStop(1, 'rgba(4,7,15,0)');
+    scrimBot = g.createLinearGradient(0, gy + GAME_H - 300, 0, gy + GAME_H);
+    scrimBot.addColorStop(0, 'rgba(4,7,15,0)'); scrimBot.addColorStop(1, 'rgba(4,7,15,0.9)');
+    paintBackdrop();
+    chunks = []; popup = null; aborted = false; autoDl = true;
+    const now = performance.now();
+    menuJob = { secs: Number(menuSel.value) || 20, t0: now, outroT0: 0, fade: 0, nextAt: now + 3000 + Math.random() * 1000,
+      orig: { paint: menu.paintIndex(), glow: menu.glowIndex() } };
+    G.shotT = 1e6;
+    if (bedTap) bedTap.gain.value = 1; // the menu's own sound is the engine idle: keep it in this video
+    rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8000000, audioBitsPerSecond: 128000 });
+    rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+    rec.onstop = finish;
+    rec.start(500);
+    recT0 = now; pausedMs = 0; pauseAt = 0; lastDraw = 0;
+    phase = 'menu';
+    dl.hidden = true;
+    status.textContent = '● Enregistrement du menu (' + menuJob.secs + ' s)…';
+  }
+  menuBtn.addEventListener('click', startMenu);
+
   // ---------- recording ----------
   function begin() {
     st = STYLES[prefs.style];
+    kickerText = st.kicker; dlName = 'night-highway-' + prefs.style;
     const raw = (prefs.texts[prefs.style] != null ? prefs.texts[prefs.style] : st.title).trim() || st.title;
     title = st.title === '' ? '' : raw.replace('[SCORE]', G.best > 0 ? fmt(G.best) : 'ÇA');
     endText = (prefs.ends[prefs.style] != null ? prefs.ends[prefs.style] : st.endTitle).trim();
@@ -388,7 +500,7 @@ export function createClip({ canvas, G, hud }) {
     scrimBot = g.createLinearGradient(0, gy + GAME_H - 300, 0, gy + GAME_H);
     scrimBot.addColorStop(0, 'rgba(4,7,15,0)'); scrimBot.addColorStop(1, 'rgba(4,7,15,0.9)');
     paintBackdrop();
-    chunks = []; popup = null;
+    chunks = []; popup = null; autoDl = false;
     bestStart = G.best || 0; // G.best only updates when the run ends
     aborted = false;
     rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8000000, audioBitsPerSecond: 128000 });
@@ -416,6 +528,7 @@ export function createClip({ canvas, G, hud }) {
     status.textContent = 'Clip prêt : ' + '~' + secs + ' s, ' + (blob.size / 1048576).toFixed(1) + ' Mo (' + ext.toUpperCase() + ').' + (note ? ' ' + note : '');
     dl.hidden = false;
     phase = 'idle';
+    if (autoDl) { autoDl = false; dl.click(); }
   }
 
   function finish() {
@@ -428,6 +541,7 @@ export function createClip({ canvas, G, hud }) {
 
   function abort() {
     if (job) job.cancelled = true;
+    restoreMenu();
     if (phase === 'idle' || !rec) return;
     aborted = true;
     try { if (rec.state !== 'inactive') rec.stop(); } catch (e) { /* already stopped */ }
@@ -438,6 +552,7 @@ export function createClip({ canvas, G, hud }) {
     if (G.state === shownState) return;
     shownState = G.state;
     panel.hidden = !(G.state === 'title' || G.state === 'end');
+    menuRow.hidden = G.state !== 'title';
   }
 
   return {
@@ -445,6 +560,24 @@ export function createClip({ canvas, G, hud }) {
     draw() {
       syncPanel();
       if (!mime) return;
+      if (phase === 'menu' || phase === 'menuout') {
+        const now = performance.now();
+        if (G.state !== 'title') { abort(); return; }
+        if (phase === 'menu') {
+          if (now - menuJob.t0 >= menuJob.secs * 1000) { phase = 'menuout'; menuJob.outroT0 = now; }
+          else if (now >= menuJob.nextAt) nextPlan(now);
+        }
+        if (now - lastDraw < FRAME_MS - 2) return;
+        lastDraw = now;
+        g.drawImage(backdrop, 0, 0);
+        drawGame();
+        if (phase === 'menu') drawMenuOverlay(now);
+        else {
+          drawMenuOutro(now - menuJob.outroT0);
+          if (now - menuJob.outroT0 >= OUTRO_MS) { restoreMenu(); phase = 'finishing'; rec.stop(); }
+        }
+        return;
+      }
       if (G.state === 'drive') {
         const w = performance.now();
         if (lastGameT !== null && w - lastWall > 0 && w - lastWall < 1000) {
@@ -485,6 +618,13 @@ export function createClip({ canvas, G, hud }) {
     onNearMiss(gap, text, sub) {
       if (phase !== 'rec') return;
       if (st.live) popup = { text, sub, t0: performance.now() };
+    },
+    // the car's own sounds only go into the recording for the menu video
+    attachBed(bed) {
+      bedTap = actx.createGain();
+      bedTap.gain.value = 0;
+      bed.connect(bedTap);
+      bedTap.connect(dest);
     },
     // the clip always gets the sound, whatever the player's M setting is
     attachAudio(ctx, master) {

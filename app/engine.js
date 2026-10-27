@@ -1643,7 +1643,7 @@ const audio = {
       }
       // clip mode: the car's own sounds (engine, wind, road, scraping) skip the recording tap; effects keep it
       this.bed = this.master;
-      if (clip) { this.bed = ctx.createGain(); this.bed.gain.value = 0.42; this.bed.connect(this.spk); }
+      if (clip) { this.bed = ctx.createGain(); this.bed.gain.value = 0.42; this.bed.connect(this.spk); clip.attachBed(this.bed); }
       this.o1 = ctx.createOscillator(); this.o1.type = 'sawtooth';
       this.o2 = ctx.createOscillator(); this.o2.type = 'square';
       this.o3 = ctx.createOscillator(); this.o3.type = 'sawtooth';
@@ -2271,7 +2271,16 @@ function boot(data) {
 }
 boot({});
 if (new URLSearchParams(window.location.search).get('clip') === '1') {
-  import('./clip.js').then((m) => { clip = m.createClip({ canvas, G, hud: HUD.hud }); }).catch(() => { /* clip mode is optional */ });
+  import('./clip.js').then((m) => { clip = m.createClip({
+    canvas, G, hud: HUD.hud,
+    // what the menu video cycles through
+    menu: {
+      nPaints: PAINTS.length, paintIndex: () => paintIdx, paintName: (i) => PAINTS[i].name, setPaint,
+      nGlow: GLOW.length, glowIndex: () => glowIdx, glowName: (i) => GLOW[i].name,
+      setGlow: (i) => { glowIdx = i; applyGlow(); },
+    },
+    initAudio: () => audio.init(),
+  }); }).catch(() => { /* clip mode is optional */ });
 }
 window.NightHighway = { G, player, keys, startRun, endRun };
 }
