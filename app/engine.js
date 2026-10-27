@@ -1641,6 +1641,9 @@ const audio = {
         this.master.gain.value = this.enabled ? 0.42 : 0;
         this.master.connect(ctx.destination);
       }
+      // clip mode: the car's own sounds (engine, wind, road, scraping) skip the recording tap; effects keep it
+      this.bed = this.master;
+      if (clip) { this.bed = ctx.createGain(); this.bed.gain.value = 0.42; this.bed.connect(this.spk); }
       this.o1 = ctx.createOscillator(); this.o1.type = 'sawtooth';
       this.o2 = ctx.createOscillator(); this.o2.type = 'square';
       this.o3 = ctx.createOscillator(); this.o3.type = 'sawtooth';
@@ -1651,7 +1654,7 @@ const audio = {
       this.o1.connect(this.eFilter);
       this.o2.connect(g2).connect(this.eFilter);
       this.o3.connect(g3).connect(this.eFilter);
-      this.eFilter.connect(this.eGain).connect(this.master);
+      this.eFilter.connect(this.eGain).connect(this.bed);
       const len = ctx.sampleRate * 2;
       const buf = ctx.createBuffer(1, len, ctx.sampleRate);
       const d = buf.getChannelData(0);
@@ -1662,15 +1665,15 @@ const audio = {
       this.wind = loop(1);
       this.wFilter = ctx.createBiquadFilter(); this.wFilter.type = 'bandpass'; this.wFilter.Q.value = 0.5;
       this.wGain = ctx.createGain(); this.wGain.gain.value = 0;
-      this.wind.connect(this.wFilter).connect(this.wGain).connect(this.master);
+      this.wind.connect(this.wFilter).connect(this.wGain).connect(this.bed);
       this.rumble = loop(0.6);
       this.rFilter = ctx.createBiquadFilter(); this.rFilter.type = 'lowpass'; this.rFilter.frequency.value = 160;
       this.rGain = ctx.createGain(); this.rGain.gain.value = 0;
-      this.rumble.connect(this.rFilter).connect(this.rGain).connect(this.master);
+      this.rumble.connect(this.rFilter).connect(this.rGain).connect(this.bed);
       this.scrapeSrc = loop(1.7);
       this.sFilter = ctx.createBiquadFilter(); this.sFilter.type = 'bandpass'; this.sFilter.frequency.value = 2400; this.sFilter.Q.value = 3;
       this.sGain = ctx.createGain(); this.sGain.gain.value = 0;
-      this.scrapeSrc.connect(this.sFilter).connect(this.sGain).connect(this.master);
+      this.scrapeSrc.connect(this.sFilter).connect(this.sGain).connect(this.bed);
       const t = ctx.currentTime;
       [this.o1, this.o2, this.o3, this.wind, this.rumble, this.scrapeSrc].forEach((n) => n.start(t));
     } catch (e) {

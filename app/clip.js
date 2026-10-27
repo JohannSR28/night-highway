@@ -27,25 +27,7 @@ const STYLES = {
   defi: {
     label: 'Défi', title: '60 SECONDES. COMBIEN DE KM ?', live: true,
     kicker: 'DÉFI', accent: ['#ff2b45', '255,43,69'], endTitle: 'TU FAIS MIEUX ?',
-    hint: 'Titre en question, score en direct, fin « TU FAIS MIEUX ? ».',
     outro: {},
-  },
-  nearmiss: {
-    label: 'Near miss', title: 'ÇA PASSE... OU PAS ?', live: true, cut: true,
-    kicker: 'NEAR MISS', accent: ['#ff2b45', '255,43,69'], allAccent: true, endTitle: 'ET TOI ?',
-    hint: 'Garde le meilleur near miss avec un ralenti. Le montage prend ~10 s après la course.',
-    outro: {},
-  },
-  night: {
-    label: 'Night drive', title: '', live: false, hideHud: true, endTitle: '', accent: ['#79c2ff', '121,194,255'],
-    hint: 'Aucun texte pendant la course, HUD caché, seulement l’URL à la fin.',
-    outro: { urlOnly: true },
-  },
-  record: {
-    label: 'Record', title: 'PERSONNE N’A BATTU [SCORE]', live: true,
-    kicker: 'RECORD', accent: ['#79c2ff', '121,194,255'], allAccent: true, endTitle: '',
-    hint: '[SCORE] = ton meilleur score sur cet appareil au départ. Score géant à la fin.',
-    outro: { big: true },
   },
 };
 
@@ -78,7 +60,6 @@ function savePrefs() { try { window.localStorage.setItem('night-highway:clip2', 
 
 const fmt = (n) => Math.floor(n).toLocaleString('en-US');
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
-const once = (el, ev) => new Promise((res) => el.addEventListener(ev, res, { once: true }));
 
 function wrap(g, text, maxW) {
   const lines = [];
@@ -156,12 +137,12 @@ export function createClip({ canvas, G, hud }) {
   let actx = null, dest = null;
   let rec = null;
   let chunks = [];
-  let phase = 'idle'; // idle | rec | outro | finishing | cutting
+  let phase = 'idle'; // idle | rec | outro | finishing
   let aborted = false, job = null;
   let outroT0 = 0, lastDraw = 0, recT0 = 0, shownState = '';
   let blobUrl = null;
   let st = STYLES.defi, title = '', endText = '', gy = 420, hideHudNow = false;
-  let events = [], popup = null, fin = { score: 0, dist: 0, nm: 0 };
+  let popup = null, fin = { score: 0, dist: 0, nm: 0 };
   let scrimTop = null, scrimBot = null;
   // game seconds that pass per real second; below 1 on slow machines, where the game's time step is capped
   let rate = 1, lastWall = 0, lastGameT = null, pausedMs = 0, pauseAt = 0;
@@ -173,12 +154,6 @@ export function createClip({ canvas, G, hud }) {
   panel.hidden = true;
   panel.appendChild(el('div', 'font:600 11px ' + F.mono + ';letter-spacing:.2em;text-transform:uppercase;color:#79c2ff;margin-bottom:8px', 'Mode clip'));
   const fieldCss = 'width:100%;padding:7px 9px;border-radius:6px;border:1px solid rgba(165,190,245,.4);background:#0a1126;color:#fff;font:inherit';
-  const select = el('select', fieldCss);
-  select.setAttribute('aria-label', 'Style de clip');
-  for (const k in STYLES) { const o = el('option', '', STYLES[k].label); o.value = k; select.appendChild(o); }
-  panel.appendChild(select);
-  const hint = el('div', 'margin-top:6px;font-size:12px;color:#a3b2d6');
-  panel.appendChild(hint);
   const titleRow = el('div', 'display:flex;gap:6px;margin-top:8px');
   const input = el('input', fieldCss + ';text-transform:uppercase;flex:1;min-width:0');
   input.type = 'text'; input.maxLength = 70;
@@ -224,8 +199,6 @@ export function createClip({ canvas, G, hud }) {
 
   function refreshPanel() {
     const s = STYLES[prefs.style];
-    select.value = prefs.style;
-    hint.textContent = s.hint;
     const hasTitle = s.title !== '';
     titleRow.hidden = !hasTitle;
     input.value = prefs.texts[prefs.style] != null ? prefs.texts[prefs.style] : s.title;
@@ -235,10 +208,8 @@ export function createClip({ canvas, G, hud }) {
     endInput.placeholder = 'Texte de fin (vide = aucun)';
     checks.hideHud.checked = s.hideHud ? true : !!prefs.hideHud;
     checks.hideHud.disabled = !!s.hideHud;
-    checks.last15.checked = s.cut ? false : !!prefs.last15;
-    checks.last15.disabled = !!s.cut;
+    checks.last15.checked = !!prefs.last15;
   }
-  select.addEventListener('change', () => { prefs.style = select.value; savePrefs(); refreshPanel(); });
   dice.addEventListener('click', () => {
     const cur = input.value.trim().toUpperCase();
     let next = cur;
@@ -327,7 +298,7 @@ export function createClip({ canvas, G, hud }) {
     g.restore();
     g.save();
     g.shadowColor = 'rgba(0,0,0,0.7)'; g.shadowBlur = 16;
-    statBlock(SAFE.left, 'left', 'DISTANCE', (G.distRun / 1000).toFixed(2), 'km');
+    statBlock(SAFE.left, 'left', 'SCORE', fmt(G.score), '');
     statBlock(SAFE.right, 'right', 'NEAR MISSES', String(G.nearMiss), '');
     g.restore();
     if (popup) {
@@ -412,7 +383,7 @@ export function createClip({ canvas, G, hud }) {
     scrimBot = g.createLinearGradient(0, gy + GAME_H - 300, 0, gy + GAME_H);
     scrimBot.addColorStop(0, 'rgba(4,7,15,0)'); scrimBot.addColorStop(1, 'rgba(4,7,15,0.9)');
     paintBackdrop();
-    chunks = []; events = []; popup = null;
+    chunks = []; popup = null;
     aborted = false;
     rec = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 8000000, audioBitsPerSecond: 128000 });
     rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
@@ -436,7 +407,7 @@ export function createClip({ canvas, G, hud }) {
     if (blobUrl) URL.revokeObjectURL(blobUrl);
     blobUrl = URL.createObjectURL(blob);
     const secs = Math.round((performance.now() - recT0 - pausedMs) / 1000);
-    status.textContent = 'Clip prêt : ' + (st.cut ? '' : '~' + secs + ' s, ') + (blob.size / 1048576).toFixed(1) + ' Mo (' + ext.toUpperCase() + ').' + (note ? ' ' + note : '');
+    status.textContent = 'Clip prêt : ' + '~' + secs + ' s, ' + (blob.size / 1048576).toFixed(1) + ' Mo (' + ext.toUpperCase() + ').' + (note ? ' ' + note : '');
     dl.hidden = false;
     phase = 'idle';
   }
@@ -446,86 +417,7 @@ export function createClip({ canvas, G, hud }) {
     if (aborted || !chunks.length) { phase = 'idle'; return; }
     const blob = new Blob(chunks, { type: mime.split(';')[0] });
     chunks = [];
-    if (st.cut) cutPass(blob); else publish(blob, '');
-  }
-
-  // near-miss style: replay the recording and re-record the best moment, in slow motion
-  async function cutPass(blob) {
-    phase = 'cutting';
-    const mine = (job = { cancelled: false });
-    status.textContent = 'Montage du near miss… ne change pas d’onglet.';
-    const url = URL.createObjectURL(blob);
-    const v = document.createElement('video');
-    v.playsInline = true; v.preservesPitch = false; v.mozPreservesPitch = false; v.webkitPreservesPitch = false;
-    v.src = url;
-    const bail = (why) => { URL.revokeObjectURL(url); if (!mine.cancelled) publish(blob, why); };
-    try {
-      await once(v, 'loadedmetadata');
-      if (!isFinite(v.duration)) { v.currentTime = 1e7; await once(v, 'seeked'); }
-      const dur = v.duration;
-      if (!isFinite(dur) || dur < 1) { bail('Montage impossible, clip complet.'); return; }
-      const best = events.reduce((m, e) => (!m || e.gap <= m.gap ? e : m), null);
-      let start, end, slowA = -1, slowB = -1;
-      if (best) {
-        start = Math.max(0, best.t - 3); end = Math.min(dur - 0.05, best.t + 2);
-        slowA = best.t - 0.5; slowB = best.t + 0.5;
-      } else { start = Math.max(0, dur - 8); end = dur - 0.05; }
-      v.currentTime = start;
-      await once(v, 'seeked');
-      const out = comp.captureStream(30);
-      if (actx) {
-        if (actx.state === 'suspended') actx.resume().catch(() => {});
-        const d2 = actx.createMediaStreamDestination();
-        actx.createMediaElementSource(v).connect(d2);
-        d2.stream.getAudioTracks().forEach((t) => out.addTrack(t));
-      }
-      const r2 = new MediaRecorder(out, { mimeType: mime, videoBitsPerSecond: 8000000, audioBitsPerSecond: 128000 });
-      const parts = [];
-      r2.ondataavailable = (e) => { if (e.data && e.data.size) parts.push(e.data); };
-      const stopped = once(r2, 'stop');
-      r2.start(500);
-      await v.play();
-      const freeze = document.createElement('canvas');
-      freeze.width = W; freeze.height = H;
-      let outroAt = 0;
-      await new Promise((resolve) => {
-        const tick = (now) => {
-          if (mine.cancelled) { resolve(); return; }
-          if (!outroAt) {
-            const t = v.currentTime;
-            const slow = t >= slowA && t <= slowB;
-            v.playbackRate = slow ? 0.3 : 1;
-            g.drawImage(v, 0, 0, W, H);
-            if (slow) {
-              g.fillStyle = 'rgba(255,43,69,0.12)'; g.fillRect(0, gy, W, GAME_H);
-              g.save();
-              g.textAlign = 'center'; g.textBaseline = 'alphabetic';
-              g.font = font(900, 150, F.display); g.fillStyle = C.red;
-              glowText(g, 'À ' + Math.round(Math.max(0, best.gap) * 100) + ' CM', (SAFE.left + SAFE.right) / 2, gy + 760, C.red, '255,43,69', 150, TEXT_W);
-              g.restore();
-            }
-            if (t >= end || v.ended) {
-              v.pause();
-              freeze.getContext('2d').drawImage(comp, 0, 0);
-              outroAt = now;
-            }
-          } else {
-            g.drawImage(freeze, 0, 0);
-            drawOutro(now - outroAt);
-            if (now - outroAt >= OUTRO_MS) { resolve(); return; }
-          }
-          requestAnimationFrame(tick);
-        };
-        requestAnimationFrame(tick);
-      });
-      r2.stop();
-      await stopped;
-      URL.revokeObjectURL(url);
-      if (mine.cancelled) return;
-      publish(new Blob(parts, { type: mime.split(';')[0] }), best ? 'Ralenti sur ton meilleur near miss.' : 'Aucun near miss : 8 dernières secondes.');
-    } catch (e) {
-      bail('Montage impossible, clip complet.');
-    }
+    publish(blob, '');
   }
 
   function abort() {
@@ -557,14 +449,13 @@ export function createClip({ canvas, G, hud }) {
       if (phase === 'idle') {
         if (G.state !== 'drive') return;
         // last-15 mode starts when about LAST_REAL_S real seconds remain, not game seconds
-        if (prefs.last15 && !STYLES[prefs.style].cut && G.time / rate > LAST_REAL_S) return;
+        if (prefs.last15 && G.time / rate > LAST_REAL_S) return;
         begin();
       }
-      if (phase === 'finishing' || phase === 'cutting') return;
+      if (phase === 'finishing') return;
       const now = performance.now();
       if (phase === 'rec' && G.state === 'end') {
         fin = { score: Math.floor(G.score), dist: G.distRun / 1000, nm: G.nearMiss };
-        if (st.cut) { phase = 'finishing'; rec.stop(); return; }
         phase = 'outro'; outroT0 = now;
       }
       if (now - lastDraw < FRAME_MS - 2) return;
@@ -587,7 +478,6 @@ export function createClip({ canvas, G, hud }) {
     },
     onNearMiss(gap, text, sub) {
       if (phase !== 'rec') return;
-      events.push({ t: (performance.now() - recT0) / 1000, gap });
       if (st.live) popup = { text, sub, t0: performance.now() };
     },
     // the clip always gets the sound, whatever the player's M setting is
